@@ -441,3 +441,236 @@ export const useGenerateVideo = (
 
   return { generating, error, videoUrl };
 };
+
+export interface FormField {
+  name: string;
+  label: string;
+  type: 'text' | 'email' | 'number' | 'tel' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'date' | 'time' | 'password';
+  placeholder?: string;
+  required?: boolean;
+  options?: Array<{ label: string; value: string }>;
+  validation?: {
+    pattern?: string;
+    min?: number;
+    max?: number;
+    minLength?: number;
+    maxLength?: number;
+  };
+  description?: string;
+  defaultValue?: any;
+}
+
+export interface FormConfig {
+  title?: string;
+  description?: string;
+  fields: FormField[];
+  submitLabel?: string;
+  cancelLabel?: string;
+  layout?: 'vertical' | 'horizontal' | 'grid';
+}
+
+export const useGenerateForm = (intent: string, data: Signal<any>, cacheTTL?: number) => {
+  const { allContext, timestamp, language, persona } = useAIContext();
+
+  const generating = useSignal<boolean>(false);
+  const formConfig = useSignal<FormConfig>();
+  const error = useSignal<string>();
+
+  const generateFormConfig = server$(async (intent: string, data: any, context: Context) => {
+    const ask = useAskToAI();
+
+    const formCacheKey = await hashString(
+      `FORM:${intent}-DATA:${JSON.stringify(data)}-CONTEXT:${context.sessionId}-LANG:${context.language}-TIMESTAMP:${context.timestamp}-PERSONA:${context.persona}`
+    );
+
+    if (cache.has(formCacheKey)) {
+      return await cache.getOrWait(formCacheKey);
+    }
+
+    const generationPromise = (async () => {
+      const prompt = `
+Create a form configuration for: ${intent}
+
+Context:
+- User persona: ${context.persona}
+- Language: ${context.language}
+
+Data context: ${JSON.stringify(data, null, 2)}
+
+Requirements:
+1. Generate a complete form configuration object
+2. Include appropriate field types (text, email, number, tel, textarea, select, checkbox, radio, date, time, password)
+3. Add validation rules where appropriate (required, pattern, min, max, minLength, maxLength)
+4. Include helpful placeholders and descriptions
+5. Use clear, accessible labels in ${context.language}
+6. Consider the persona ${context.persona} for field choices and wording
+7. Add options arrays for select/radio fields if needed
+8. Suggest a logical layout (vertical, horizontal, or grid)
+
+Return ONLY a valid JSON object with this structure:
+{
+  "title": "Form Title",
+  "description": "Form description (optional)",
+  "fields": [
+    {
+      "name": "fieldName",
+      "label": "Field Label",
+      "type": "text",
+      "placeholder": "Optional placeholder",
+      "required": true,
+      "validation": {
+        "pattern": "regex pattern (optional)",
+        "min": 0,
+        "max": 100,
+        "minLength": 2,
+        "maxLength": 50
+      },
+      "description": "Help text (optional)",
+      "defaultValue": "default value (optional)",
+      "options": [
+        {"label": "Option 1", "value": "opt1"}
+      ]
+    }
+  ],
+  "submitLabel": "Submit button text",
+  "cancelLabel": "Cancel button text (optional)",
+  "layout": "vertical"
+}
+
+Return ONLY the JSON object, no markdown code blocks, no explanations.
+`;
+
+      const responseText = await ask(prompt);
+
+      const cleaned = responseText
+        .replace(/```json|```javascript|```/g, '')
+        .trim();
+
+      return cleaned;
+    })();
+
+    return await cache.setPromise(formCacheKey, generationPromise, cacheTTL);
+  });
+
+  const translateFormConfig = server$(async (formConfig: FormConfig, context: Context) => {
+    const ask = useAskToAI();
+
+    const translationCacheKey = await hashString(
+      `FORM-TRANSLATE:${JSON.stringify(formConfig)}-LANG:${context.language}`
+    );
+
+    if (cache.has(translationCacheKey)) {
+      return await cache.getOrWait(translationCacheKey);
+    }
+
+    const translationPromise = (async () => {
+      const prompt = `
+Translate all text in this form configuration to ${context.language}.
+This includes: title, description, field labels, placeholders, descriptions, option labels, and button labels.
+Maintain the exact JSON structure.
+
+Original form config:
+${JSON.stringify(formConfig, null, 2)}
+
+Return ONLY the translated JSON object with the same structure, no markdown or explanations.
+`;
+
+      const responseText = await ask(prompt);
+
+      const cleaned = responseText
+        .replace(/```json|```javascript|```/g, '')
+        .trim();
+
+      try {
+        return JSON.parse(cleaned);
+      } catch (e) {
+        console.error('Error parsing translated form config:', e);
+        return formConfig;
+      }
+    })();
+
+    return await cache.setPromise(translationCacheKey, translationPromise, cacheTTL);
+  });
+
+  const onGenerate = $(async () => {
+    formConfig.value = undefined;
+    error.value = undefined;
+    generating.value = true;
+
+    const maxRetries = 2;
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      try {
+        const formConfigStr = await generateFormConfig(intent, data.value, allContext.value);
+
+        let formConfigObj: FormConfig;
+        try {
+          formConfigObj = JSON.parse(formConfigStr);
+        } catch {
+          throw new Error('Failed to parse form configuration');
+        }
+
+        // Validate form config structure
+        if (!formConfigObj.fields || !Array.isArray(formConfigObj.fields)) {
+          throw new Error('Form configuration missing "fields" array');
+        }
+
+        if (formConfigObj.fields.length === 0) {
+          throw new Error('Form configuration has no fields');
+        }
+
+        // Validate each field
+        for (const field of formConfigObj.fields) {
+          if (!field.name || !field.label || !field.type) {
+            throw new Error('Each field must have name, label, and type properties');
+          }
+        }
+
+        // Translate the form config
+        const translatedConfig = await translateFormConfig(formConfigObj, allContext.value);
+
+        // Set defaults
+        if (!translatedConfig.submitLabel) {
+          translatedConfig.submitLabel = 'Submit';
+        }
+        if (!translatedConfig.layout) {
+          translatedConfig.layout = 'vertical';
+        }
+
+        formConfig.value = translatedConfig;
+        break;
+
+      } catch (err) {
+        console.error(`Form generation attempt ${attempt + 1} failed:`, err);
+        attempt++;
+
+        if (attempt > maxRetries) {
+          error.value = (err as Error).message || 'Error generating form';
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
+    }
+
+    await nextTick(() => {
+      generating.value = false;
+    }, 300);
+  });
+
+  useVisibleTask$(async ({ track }) => {
+    track(persona);
+    track(language);
+    track(timestamp);
+    track(data);
+
+    await onGenerate();
+  });
+
+  return {
+    generating,
+    error,
+    formConfig,
+    onGenerate
+  };
+};

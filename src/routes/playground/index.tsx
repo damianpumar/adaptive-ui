@@ -11,12 +11,19 @@ import { useAIContext } from "~/neurify/context/context";
 import * as monaco from "monaco-editor";
 import { AIChart } from "~/neurify/components/AIChart";
 import { AIVideo } from "~/neurify/components/AIVideo";
+import { AIForm } from "~/neurify/components/AIForm";
 
 export default component$(() => {
   const USES_CASES = [
     {
       topic: "E-commerce",
-      code: `<AIVideo
+      code: `<AIForm
+  intent="Create a contact form with name, email, phone and message"
+  data={reactiveData}
+  onSubmit$={handleSubmit}
+/>
+
+<AIVideo
   intent="Show promotional video"
   data={data}
   durationMS={3000}
@@ -389,6 +396,15 @@ export default component$(() => {
   durationMS={3000}
 />`,
     },
+    {
+      id: "ai-form",
+      title: "AIForm",
+      template: `<AIForm
+  intent="Create a contact form with name, email, phone and message"
+  data={reactiveData}
+  onSubmit$={handleSubmit}
+/>`,
+    },
   ];
 
   const TARGETS_PERSONAS = ["Luxury buyer", "Gen Z Buyer", "Eco Consumer"];
@@ -422,6 +438,7 @@ export default component$(() => {
   const dataMonacoInstance = useSignal<monaco.editor.IStandaloneCodeEditor>();
   const isDataEditorCollapsed = useSignal(true);
   const editableData = useSignal<any>(USES_CASES[0].data);
+  const reactiveData = useSignal<any>({});
 
   const state = useStore<{
     code: string;
@@ -466,6 +483,7 @@ export default component$(() => {
       const aiTextRegex = /<AIText\s+([^>]*?)\/>/g;
       const aiChartRegex = /<AIChart\s+([^>]*?)\/>/g;
       const aiVideoRegex = /<AIVideo\s+([^>]*?)\/>/g;
+      const aiFormRegex = /<AIForm\s+([^>]*?)\/>/g;
 
       const allMatches: Array<{
         type: string;
@@ -538,6 +556,24 @@ export default component$(() => {
             intent: intentMatch ? intentMatch[1] : "Show video",
             className: classMatch ? classMatch[1] : "",
             durationMS: durationMatch ? parseInt(durationMatch[1]) : 3000,
+          },
+        });
+      }
+
+      while ((match = aiFormRegex.exec(state.code)) !== null) {
+        const propsString = match[1];
+        const intentMatch = propsString.match(/intent="([^"]+)"/);
+        const classMatch = propsString.match(/class="([^"]+)"/);
+        const handler = propsString.match(/onSubmit\$\=\{([^\}]+)\}/);
+
+        allMatches.push({
+          type: "AIForm",
+          index: match.index,
+          length: match[0].length,
+          props: {
+            intent: intentMatch ? intentMatch[1] : "Generate form",
+            className: classMatch ? classMatch[1] : "",
+            onSubmit$: handler ? handler[1] : "handleSubmit",
           },
         });
       }
@@ -671,6 +707,16 @@ export default component$(() => {
                 documentation: "AI-powered video generation component",
                 insertText:
                   '<AIVideo\n  intent="${1:Show promotional video}"\n  data={data}\n  durationMS={3000}\n/>',
+                insertTextRules:
+                  monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                range: range,
+              },
+              {
+                label: "AIForm",
+                kind: monaco.languages.CompletionItemKind.Snippet,
+                documentation: "AI-powered form generation component",
+                insertText:
+                  '<AIForm\n  intent="${1:Create contact form}"\n  data={reactiveData}\n  onSubmit$={handleSubmit}\n/>',
                 insertTextRules:
                   monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
                 range: range,
@@ -983,6 +1029,22 @@ export default component$(() => {
                             durationMS={element.props.durationMS}
                             intent={element.props.intent}
                             data={editableData}
+                          />
+                        </div>
+                      );
+                    } else if (element.type === "AIForm") {
+                      return (
+                        <div
+                          key={element.props.intent + element.props.durationMS}
+                          class={element.props.className}
+                        >
+                          <AIForm
+                            class="text-white"
+                            intent={element.props.intent}
+                            data={reactiveData}
+                            onSubmit$={$((data) => {
+                              console.log("Form submitted!", data);
+                            })}
                           />
                         </div>
                       );
