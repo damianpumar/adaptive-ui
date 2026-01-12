@@ -59,6 +59,12 @@ Components that learn and adapt based on user interactions:
   intent="Summarize sales by quarter"
   data={data}
 />
+
+<AIVideo
+  intent="Show promotional video"
+  data={data}
+  durationMS={3000}
+/>
 ```
 
 ## 🎯 Use Cases
