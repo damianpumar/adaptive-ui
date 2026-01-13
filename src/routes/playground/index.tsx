@@ -564,7 +564,7 @@ export default component$(() => {
         const propsString = match[1];
         const intentMatch = propsString.match(/intent="([^"]+)"/);
         const classMatch = propsString.match(/class="([^"]+)"/);
-        const handler = propsString.match(/onSubmit\$\=\{([^\}]+)\}/);
+        const handler = propsString.match(/onSubmit\$=\{([^}]+)}/);
 
         allMatches.push({
           type: "AIForm",
